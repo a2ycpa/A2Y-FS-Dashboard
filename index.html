@@ -109,6 +109,21 @@ button{cursor:pointer;font-family:var(--sans)}
 .main-tab:hover{color:rgba(240,244,255,.8)}
 .main-tab.active{color:#f0f4ff;border-bottom-color:var(--g400);font-weight:600}
 
+/* ─────────── SYNC TO DASHBOARD BAR ─────────── */
+.sync-bar-persist{background:var(--navy2);border-bottom:2px solid var(--g500);padding:8px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sbp-lbl{font-size:.62rem;font-weight:700;color:rgba(240,244,255,.5);text-transform:uppercase;letter-spacing:.1em;font-family:var(--mono);white-space:nowrap}
+.sbp-target{font-size:.82rem;font-weight:600;color:#f0f4ff;font-family:var(--sans);white-space:nowrap}
+.sbp-target strong{font-weight:700}
+.sbp-target .sbp-arrow{color:rgba(240,244,255,.35);margin:0 4px}
+.sbp-target .sbp-id{font-family:var(--mono);font-size:.72rem;color:var(--g400)}
+.sbp-status{display:flex;align-items:center;gap:6px;font-size:.68rem;font-weight:600;color:rgba(240,244,255,.7);font-family:var(--mono);white-space:nowrap}
+.sbp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block}
+.sbp-dot.g{background:var(--green)}
+.sbp-dot.r{background:var(--red)}
+.sbp-status .sbp-org{color:rgba(240,244,255,.4);font-weight:500}
+.sbp-last{font-size:.66rem;color:rgba(240,244,255,.4);font-family:var(--mono);white-space:nowrap;margin-left:auto}
+.sbp-btn{flex-shrink:0}
+
 /* ─────────── LOCATION + PERIOD BAR ─────────── */
 .sub-bar{background:var(--surface);border-bottom:1px solid var(--br);box-shadow:var(--shadow)}
 .sub-bar-inner{max-width:100%;padding:10px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
@@ -430,6 +445,15 @@ button{cursor:pointer;font-family:var(--sans)}
       <button class="main-tab" onclick="switchTab('ratios',this)">Performance Ratios</button>
       <button class="main-tab" onclick="switchTab('upload',this)">📂 Upload &amp; Files</button>
     </div>
+  </div>
+
+  <!-- SYNC TO DASHBOARD BAR -->
+  <div class="sync-bar-persist" id="sync-bar-persist" style="display:none">
+    <span class="sbp-lbl">Sync To:</span>
+    <span class="sbp-target" id="sbp-target"></span>
+    <span class="sbp-status" id="sbp-status"></span>
+    <span class="sbp-last" id="sbp-last"></span>
+    <button class="hbtn hbtn-gold sbp-btn" id="sbp-btn" onclick="syncToGitHub()">⬆ Sync to Dashboard</button>
   </div>
 
   <div id="period-list" style="display:none"></div>
@@ -803,6 +827,7 @@ function initApp() {
   }
   renderContent();
   renderFileManager();
+  renderSyncBar();
 }
 
 /* ===================================================================
@@ -862,15 +887,41 @@ async function syncToGitHub() {
   var gh = getGh();
   if (!gh.token || !gh.user || !gh.repo) { showToast('Configure GitHub settings first', true); openGhModal(); return; }
   var st = _id('sync-status');
-  st.textContent = 'Syncing…'; st.style.color = 'var(--navy4)';
+  var btn = _id('sbp-btn');
+  if (st) { st.textContent = 'Syncing…'; st.style.color = 'var(--navy4)'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing…'; }
   var ok1 = await ghPut('data/clients.json', clients, _sha['data/clients.json'] || null);
+  var ok = ok1;
   if (activeClientId) {
     var rp = 'data/' + activeClientId + '/reports.json';
     var ok2 = await ghPut(rp, reportData, _sha[rp] || null);
-    if (ok1 && ok2) { st.textContent = '✓ Synced ' + new Date().toLocaleTimeString(); st.style.color = 'var(--green)'; }
-    else { st.textContent = '✗ Sync failed'; st.style.color = 'var(--red)'; }
-  } else if (ok1) { st.textContent = '✓ Clients synced'; st.style.color = 'var(--green)'; }
-  showToast(st.textContent.includes('✓') ? 'Synced to GitHub' : 'Sync failed — check token/repo', !st.textContent.includes('✓'));
+    ok = ok1 && ok2;
+  }
+  if (ok) {
+    if (st) { st.textContent = '✓ Synced ' + new Date().toLocaleTimeString(); st.style.color = 'var(--green)'; }
+    if (activeClientId) localStorage.setItem('fs_lastSync_' + activeClientId, new Date().toISOString());
+  } else if (st) {
+    st.textContent = '✗ Sync failed'; st.style.color = 'var(--red)';
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = '⬆ Sync to Dashboard'; }
+  renderSyncBar();
+  showToast(ok ? 'Synced to GitHub' : 'Sync failed — check token/repo', !ok);
+}
+
+function renderSyncBar() {
+  var bar = _id('sync-bar-persist');
+  if (!bar) return;
+  var c = clients.find(function(x) { return x.id === activeClientId; });
+  if (!c) { bar.style.display = 'none'; return; }
+  var gh = getGh();
+  var configured = !!(gh.user && gh.repo && gh.token);
+  _id('sbp-target').innerHTML = '<strong>' + esc(c.name) + '</strong><span class="sbp-arrow">→</span><span class="sbp-id">' + esc(c.id) + '</span>';
+  _id('sbp-status').innerHTML = configured
+    ? '<span class="sbp-dot g"></span>Ready<span class="sbp-org"> · ' + esc(gh.user) + '</span>'
+    : '<span class="sbp-dot r"></span>Not configured';
+  var lastSync = localStorage.getItem('fs_lastSync_' + activeClientId);
+  _id('sbp-last').textContent = lastSync ? 'Last synced: ' + new Date(lastSync).toLocaleString('en-CA') : 'Never synced';
+  bar.style.display = 'flex';
 }
 
 /* ===================================================================
@@ -901,7 +952,7 @@ function switchClient(cid) {
   loadArchiveLocal();
   activeLocation = null; activePeriod = null; compareMonths = [];
   periodMode = 'single'; compareMode = false;
-  renderLocBar(); renderPeriodBar(); renderContent(); updateSbInfo(); renderFileManager();
+  renderLocBar(); renderPeriodBar(); renderContent(); updateSbInfo(); renderFileManager(); renderSyncBar();
 }
 
 function openClientsModal() { renderClientListEl(); _id('clients-ol').classList.add('show'); }
@@ -933,7 +984,7 @@ function saveNewClient() {
   _id('nc-name').value = ''; _id('nc-pw').value = ''; _id('nc-url').value = '';
   activeClientId = cid; reportData = {};
   _id('client-sel').value = cid;
-  renderLocBar(); renderPeriodBar(); renderContent(); updateSbInfo();
+  renderLocBar(); renderPeriodBar(); renderContent(); updateSbInfo(); renderSyncBar();
   showToast('"' + name + '" added');
 }
 function openEditClient(cid) {
@@ -949,14 +1000,14 @@ function saveEditClient() {
   c.password = _id('ec-pw').value.trim();
   c.url = _id('ec-url').value.trim();
   c.color = _id('ec-color').value;
-  saveClientsLocal(); renderClientSel(); renderClientListEl(); closeModal('edit-ol'); showToast('Client updated');
+  saveClientsLocal(); renderClientSel(); renderClientListEl(); closeModal('edit-ol'); renderSyncBar(); showToast('Client updated');
 }
 function deleteClient(cid) {
   if (!confirm('Delete this client and all their data?')) return;
   clients = clients.filter(function(c) { return c.id !== cid; });
-  saveClientsLocal(); localStorage.removeItem('fs_rd_' + cid);
+  saveClientsLocal(); localStorage.removeItem('fs_rd_' + cid); localStorage.removeItem('fs_lastSync_' + cid);
   if (activeClientId === cid) { activeClientId = clients.length ? clients[0].id : null; loadReportData(); }
-  renderClientSel(); renderClientListEl(); renderLocBar(); renderPeriodBar(); renderContent(); updateSbInfo();
+  renderClientSel(); renderClientListEl(); renderLocBar(); renderPeriodBar(); renderContent(); updateSbInfo(); renderSyncBar();
   showToast('Client deleted');
 }
 
@@ -967,7 +1018,7 @@ function openGhModal() {
 }
 function saveGhSettings() {
   var gh = {user: _id('gh-user').value.trim(), repo: _id('gh-repo').value.trim(), token: _id('gh-token').value.trim()};
-  saveGhLocal(gh); closeModal('gh-ol'); showToast('GitHub settings saved');
+  saveGhLocal(gh); closeModal('gh-ol'); renderSyncBar(); showToast('GitHub settings saved');
 }
 function closeModal(id) { _id(id).classList.remove('show'); }
 
